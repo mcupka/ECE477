@@ -63,6 +63,8 @@ static void MX_ADC_Init(void);
 *//* USER CODE BEGIN PFP */
 
 void nano_wait(int);
+void test_h_bridge();
+void test_encoder();
 
 /* USER CODE END PFP */
 
@@ -77,10 +79,52 @@ void nano_wait(int);
   */
 int main() {
 
-	test_h_bridge();
-
+	//test_h_bridge();
+	test_encoder();
 }
 
+
+
+void test_encoder() {
+
+	//set up timer 21 to count up using an external clock (the pulse train from the encoder)
+	//TIM 22 Ch 1 on PB4
+
+	RCC->IOPENR |= RCC_IOPENR_IOPBEN; //enable port b clock
+	RCC->APB2ENR |= RCC_APB2ENR_TIM22EN; //enable timer 22 clock
+
+	GPIOB->MODER &= ~(GPIO_MODER_MODE4); //AF mode (10)
+	GPIOB->MODER |= GPIO_MODER_MODE4_1;
+
+	GPIOB->AFR[0] &= ~(GPIO_AFRL_AFSEL4);
+	GPIOB->AFR[0] |= (0x4 << 16);	//Set the af of pb4 to 4 for TIM22 CH1
+
+	//From page 554 in programming manual
+	TIM22->CCMR1 &= ~(TIM_CCMR1_CC1S);
+	TIM22->CCMR1 |= TIM_CCMR1_CC1S_0;
+	TIM22->CCER &= ~(TIM_CCER_CC1P);
+	TIM22->CCER &= ~(TIM_CCER_CC1NP);
+	TIM22->SMCR |= TIM_SMCR_SMS;
+	TIM22->SMCR &= ~(TIM_SMCR_TS);
+	TIM22->SMCR |= TIM_SMCR_TS_2 | TIM_SMCR_TS_0;
+
+	TIM22->CCER |= TIM_CCER_CC1E;
+
+
+	TIM22->ARR = 645000;
+
+	TIM22->CR1 |= TIM_CR1_CEN; //enable counter
+	TIM22->EGR |= TIM_EGR_UG; //force update generation
+
+
+	uint32_t count;
+	while (1) {
+		nano_wait(100000);
+		count = TIM22->CNT;
+		if (count > 50000) return;
+	}
+
+}
 
 
 void test_h_bridge() {
