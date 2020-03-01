@@ -42,7 +42,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
-
+int comparator_value = 0;
+int num_comp_intrs = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -145,7 +146,14 @@ void SysTick_Handler(void)
 void ADC1_COMP_IRQHandler(void)
 {
   /* USER CODE BEGIN ADC1_COMP_IRQn 0 */
+	NVIC->ISER[0] &= ~(1 << ADC1_COMP_IRQn); //disable interrupt
 
+	comparator_value = (COMP2->CSR & COMP_CSR_COMP2VALUE) >> 30; //GET COMPARATOR VALUE
+
+	NVIC->ISER[0] |= 1 << ADC1_COMP_IRQn; //re-enable interrupt
+
+	num_comp_intrs++;
+	//printf("test");
   /* USER CODE END ADC1_COMP_IRQn 0 */
   
   /* USER CODE BEGIN ADC1_COMP_IRQn 1 */

@@ -23,6 +23,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include "stm32l0xx.h"
+
+
+#include <stdio.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -65,6 +70,7 @@ static void MX_ADC_Init(void);
 void nano_wait(int);
 void test_h_bridge();
 void test_encoder();
+void test_comparator();
 
 /* USER CODE END PFP */
 
@@ -77,13 +83,67 @@ void test_encoder();
   * @brief  The application entry point.
   * @retval int
   */
+
 int main() {
 
 	//test_h_bridge();
-	test_encoder();
+	//test_encoder();
+	test_comparator();
 }
 
+//void ADC1_COMP_IRQHandler(void) {
 
+
+//}
+
+extern int comparator_value;
+extern num_comp_intrs;
+void test_comparator() {
+
+
+	//onboard led for testing feedback. pa5
+	RCC->IOPENR |= RCC_IOPENR_IOPAEN;
+	GPIOA->MODER &= ~(GPIO_MODER_MODE5);
+	GPIOA->MODER |= GPIO_MODER_MODE5_0;
+	GPIOA->ODR |= 1 << 5;
+
+	//configure PB3 and PB6 as analog inputs to the comparator
+	RCC->IOPENR |= RCC_IOPENR_IOPBEN;
+
+	GPIOB->MODER &= ~(GPIO_MODER_MODE3);
+	GPIOB->MODER |= GPIO_MODER_MODE3_0 | GPIO_MODER_MODE3_1; //11 analog mode
+	GPIOB->MODER &= ~(GPIO_MODER_MODE6);
+	GPIOB->MODER |= GPIO_MODER_MODE6_0 | GPIO_MODER_MODE6_1;
+
+
+	RCC->APB2ENR |= 0xffffffff;
+	RCC->APB1ENR |= 0xffffffff;
+	RCC->AHBENR |= 0xffffffff;
+
+
+	COMP2->CSR &= ~(COMP_CSR_COMP2INPSEL);
+	COMP2->CSR |= (COMP_CSR_COMP2INPSEL_0 | COMP_CSR_COMP2INPSEL_1); //011 FOR PB6
+
+	COMP2->CSR &= ~(COMP_CSR_COMP2INNSEL);
+	COMP2->CSR |= COMP_CSR_COMP2INNSEL_0 | COMP_CSR_COMP2INNSEL_1 | COMP_CSR_COMP2INNSEL_2; //111 FOR PB3
+
+	COMP2->CSR |= COMP_CSR_COMP2POLARITY;
+
+	COMP2->CSR |= COMP_CSR_COMP2EN;
+
+	NVIC->ISER[0] |= 1 << ADC1_COMP_IRQn;
+
+	while (1) {
+		nano_wait(100000);
+		if (comparator_value == 1) GPIOA->ODR &= ~(1 << 5);
+		if (COMP2->CSR & COMP_CSR_COMP2VALUE) GPIOA->ODR &= ~(1 << 5);
+		else GPIOA->ODR |= 1<<5;
+		if (num_comp_intrs >= 40) return;
+	}
+
+
+
+}
 
 void test_encoder() {
 
