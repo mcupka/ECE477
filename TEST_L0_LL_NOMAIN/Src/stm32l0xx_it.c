@@ -42,8 +42,9 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
-int comparator_value = 0;
-int num_comp_intrs = 0;
+int tim6_update_count = 0;
+int comp_rising = 1;
+int steps = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -145,15 +146,25 @@ void SysTick_Handler(void)
   */
 void ADC1_COMP_IRQHandler(void)
 {
-  /* USER CODE BEGIN ADC1_COMP_IRQn 0 */
-	NVIC->ISER[0] &= ~(1 << ADC1_COMP_IRQn); //disable interrupt
+	if (comp_rising == 1) {
+			EXTI->IMR &= ~(EXTI_IMR_IM22); //disable interrupt
+			EXTI->PR |= EXTI_PR_PIF22; //clear pending flag for interrupt
 
-	comparator_value = (COMP2->CSR & COMP_CSR_COMP2VALUE) >> 30; //GET COMPARATOR VALUE
+			EXTI->IMR |= EXTI_IMR_IM21; //enable lower bound interrupt
+			comp_rising = 0;
+	}
+	else {
+			EXTI->IMR &= ~(EXTI_IMR_IM21); //disable lower bound interrupt
+			EXTI->PR |= EXTI_PR_PIF21; //clear pending flag for interrupt
 
-	NVIC->ISER[0] |= 1 << ADC1_COMP_IRQn; //re-enable interrupt
+			//if (GPIOA->ODR & (1 << 5)) GPIOA->ODR &= ~(1 << 5); //turn red led off (debugging)
+			//else GPIOA->ODR |= 1 << 5;
+			steps++;
 
-	num_comp_intrs++;
-	//printf("test");
+			TIM6->CR1 |= TIM_CR1_CEN; //enable timer to count before another step may be counted
+	}
+
+
   /* USER CODE END ADC1_COMP_IRQn 0 */
   
   /* USER CODE BEGIN ADC1_COMP_IRQn 1 */
@@ -162,6 +173,26 @@ void ADC1_COMP_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+
+
+void TIM6_DAC_IRQHandler() {
+	//clear interrupt pending flag
+	TIM6->SR &= ~(TIM_SR_UIF);
+
+	if (tim6_update_count < 10) tim6_update_count++;
+	else {
+		//disable TIM6
+		TIM6->CR1 &= ~(TIM_CR1_CEN);
+
+		comp_rising = 1;
+		EXTI->IMR |= EXTI_IMR_IM22;
+
+		//reset update count
+		tim6_update_count = 0;
+	}
+
+}
+
 
 /* USER CODE END 1 */
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

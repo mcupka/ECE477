@@ -67,6 +67,7 @@ static void MX_TIM2_Init(void);
 static void MX_ADC_Init(void);
 *//* USER CODE BEGIN PFP */
 
+void wait_for_interrupt();
 void nano_wait(int);
 void test_h_bridge();
 void test_encoder();
@@ -89,6 +90,16 @@ int main() {
 	//test_h_bridge();
 	//test_encoder();
 	test_comparator();
+
+	/*General flow of program:
+	 * 1. Initialize peripherals. Especially the coulomb counter peripheral
+	 * 2. Enter sleep mode (WFI), the only interrupt that wakes up the STM is from the comparator (pressure sensor)
+	 * 3. Once awake, perform tightening procedure:
+	 * 		-Begin tightening, sample encoder pulse count at a regular interval. It it is below a set threshold, stop the motor (it is stalling out)
+	 * 4. Once the shoes are tight, the pressure sensor will trigger interrupts to count steps.
+	 *
+	 */
+
 }
 
 //void ADC1_COMP_IRQHandler(void) {
@@ -96,8 +107,6 @@ int main() {
 
 //}
 
-extern int comparator_value;
-extern num_comp_intrs;
 void test_comparator() {
 
 
@@ -107,7 +116,7 @@ void test_comparator() {
 	GPIOA->MODER |= GPIO_MODER_MODE5_0;
 	GPIOA->ODR |= 1 << 5;
 
-	//configure PB3 and PB6 as analog inputs to the comparator
+	//configure PB3 and PB6 as analog inputs to the comparator 2
 	RCC->IOPENR |= RCC_IOPENR_IOPBEN;
 
 	GPIOB->MODER &= ~(GPIO_MODER_MODE3);
@@ -115,12 +124,14 @@ void test_comparator() {
 	GPIOB->MODER &= ~(GPIO_MODER_MODE6);
 	GPIOB->MODER |= GPIO_MODER_MODE6_0 | GPIO_MODER_MODE6_1;
 
+	//configure pa4 as analog input for comparator 1
+	GPIOA->MODER &= ~(GPIO_MODER_MODE4);
+	GPIOA->MODER |= GPIO_MODER_MODE4_0 | GPIO_MODER_MODE4_1;
 
-	RCC->APB2ENR |= 0xffffffff;
-	RCC->APB1ENR |= 0xffffffff;
-	RCC->AHBENR |= 0xffffffff;
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //comparator shares a clock with the system configuration controller
 
 
+	//comarator 2 setup
 	COMP2->CSR &= ~(COMP_CSR_COMP2INPSEL);
 	COMP2->CSR |= (COMP_CSR_COMP2INPSEL_0 | COMP_CSR_COMP2INPSEL_1); //011 FOR PB6
 
@@ -131,14 +142,44 @@ void test_comparator() {
 
 	COMP2->CSR |= COMP_CSR_COMP2EN;
 
+
+	//comparator 1 setup (lower bound)
+	COMP1->CSR |= COMP_CSR_COMP1WM; //+ of comparator is shorted with + of comp 2 (pressure sensor)
+
+	COMP1->CSR &= ~(COMP_CSR_COMP1INNSEL);
+	COMP1->CSR |= COMP_CSR_COMP1INNSEL_1; //10 for PA4
+
+	COMP1->CSR &= ~(COMP_CSR_COMP1POLARITY);
+
+	COMP1->CSR |= COMP_CSR_COMP1EN;
+
+
+	//enable timer and interrupt that we will use to "debounce" the interrupt for the pressure sensor
+	//TIMER 6
+	RCC->APB1ENR |= RCC_APB1ENR_TIM6EN;
+
+
+	NVIC->ISER[0] |= 1 << TIM6_DAC_IRQn;
+
+
+	//enable intrerrupt on exti line 22 (comparator 2)
+	EXTI->IMR |= EXTI_IMR_IM22;
+	EXTI->RTSR |= EXTI_RTSR_RT22;
+
+	EXTI->FTSR |= EXTI_FTSR_FT21; //falling edge
+	EXTI->IMR &= ~(EXTI_IMR_IM21);
+
 	NVIC->ISER[0] |= 1 << ADC1_COMP_IRQn;
 
+
 	while (1) {
-		nano_wait(100000);
-		if (comparator_value == 1) GPIOA->ODR &= ~(1 << 5);
-		if (COMP2->CSR & COMP_CSR_COMP2VALUE) GPIOA->ODR &= ~(1 << 5);
-		else GPIOA->ODR |= 1<<5;
-		if (num_comp_intrs >= 40) return;
+		nano_wait(10000000);
+		nano_wait(10000000);
+		nano_wait(10000000);
+		nano_wait(10000000);
+		GPIOA->ODR |= 1 << 5;
+		wait_for_interrupt();
+		GPIOA->ODR &= ~(1 << 5);
 	}
 
 
