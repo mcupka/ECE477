@@ -72,6 +72,8 @@ void nano_wait(int);
 void test_h_bridge();
 void test_encoder();
 void test_comparator();
+void test_uart();
+void test_coulomb_counter();
 
 /* USER CODE END PFP */
 
@@ -89,7 +91,9 @@ int main() {
 
 	//test_h_bridge();
 	//test_encoder();
-	test_comparator();
+	//test_comparator();
+	//test_uart();
+	test_coulomb_counter();
 
 	/*General flow of program:
 	 * 1. Initialize peripherals. Especially the coulomb counter peripheral
@@ -102,10 +106,96 @@ int main() {
 
 }
 
-//void ADC1_COMP_IRQHandler(void) {
+void test_coulomb_counter() {
+
+	//Coulomb counter connected to PC15. Using EXTI interrupt to count the pulses sent by the coulomb counter
+
+	//onboard led for testing feedback. pa5
+	RCC->IOPENR |= RCC_IOPENR_IOPAEN;
+	GPIOA->MODER &= ~(GPIO_MODER_MODE5);
+	GPIOA->MODER |= GPIO_MODER_MODE5_0;
+	GPIOA->ODR |= 1 << 5;
+
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
+	SYSCFG->EXTICR[3] &= ~(SYSCFG_EXTICR4_EXTI15); //Choose PC15 as EXTI source
+	SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI15_PC; //Choose PC15 as EXTI source
+
+	RCC->IOPENR |= RCC_IOPENR_IOPCEN;
+
+	GPIOC->MODER &= ~GPIO_MODER_MODE15; //00 for input mode
+
+	NVIC_EnableIRQ(EXTI4_15_IRQn);
 
 
-//}
+	EXTI->FTSR |= EXTI_FTSR_FT15; //Falling edge triggered
+	EXTI->IMR |= EXTI_IMR_IM15; //unmask the interrupt
+
+
+	while(1) {
+		nano_wait(10000);
+	}
+
+	//When the coulomb counter pulses, the interrupt will toggle the red led. With a 150 ohm resistor as the load and a 7.2V input voltage, this should happen around once every 12 seconds
+	//With 3.3V, should happen about once every 28 seconds
+}
+
+void test_uart() {
+	//testing uart using the Analog Discovery 2 as a RX/TX in place of the NRF52
+	//Uses pins PA9 (STM TX) and PA10 (STM RX)
+
+	char test_message[13] = "Test message\n";
+	char test_rx[6] = {0, 0, 0, 0, 0, 0};
+	char test_rx_expected[6] = "ledon\n";
+	short match = 0;
+
+	//Configure Pins
+	RCC->IOPENR |= RCC_IOPENR_IOPAEN;
+	GPIOA->MODER &= ~(GPIO_MODER_MODE9 | GPIO_MODER_MODE10);
+	GPIOA->MODER |= GPIO_MODER_MODE9_1 | GPIO_MODER_MODE10_1;
+	GPIOA->AFR[1] &= ~(GPIO_AFRH_AFSEL9 | GPIO_AFRH_AFSEL10);
+	GPIOA->AFR[1] |= 0x4 << 4; //usart1_tx pa9
+	GPIOA->AFR[1] |= 0x4 << 8; //usart1_rx pa10
+
+
+	RCC->APB2ENR |= RCC_APB2ENR_USART1EN; //enable usart1 clock
+
+	//Configure USART1 TX
+	/* (1) oversampling by 16, 9600 baud */
+	/* (2) 8 data bit, 1 start bit, 1 stop bit, no parity */
+	USART1->BRR = 2100000 / 9600; /* (1) */
+	USART1->CR1 |= USART_CR1_TE | USART_CR1_UE; /* (2) */
+
+	//Send data via TX
+	for (int a = 0; a < 13; a++) {
+		USART1->TDR = test_message[a];
+		while (!(USART1->ISR & USART_ISR_TC)); //wait for the transfer to be complete
+	}
+
+	//Enable the RX
+	USART1->CR1 |= USART_CR1_RE | USART_CR1_RXNEIE;
+
+	//Receive some data. if it matches the expected string, turn the onboard LED on
+	for (int a = 0; a < 6; a++) {
+		while (!((USART1->ISR & USART_ISR_RXNE) == USART_ISR_RXNE));
+		test_rx[a] = (uint8_t)(USART1->RDR); /* Receive data, clear flag */
+	}
+
+	for (int a = 0; a < 6; a++){
+		if (test_rx[a] == test_rx_expected[a]) match++;
+	}
+
+	if (match == 6) {
+		GPIOA->MODER &= ~(GPIO_MODER_MODE5);
+		GPIOA->MODER |= GPIO_MODER_MODE5_0;
+		GPIOA->ODR |= 1 << 5;
+	}
+
+	while (1) {
+		nano_wait(10000000);
+	}
+
+
+}
 
 void test_comparator() {
 

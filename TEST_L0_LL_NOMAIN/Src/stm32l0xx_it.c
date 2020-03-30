@@ -45,6 +45,7 @@
 int tim6_update_count = 0;
 int comp_rising = 1;
 int steps = 0;
+int coulomb_ticks = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -193,6 +194,24 @@ void TIM6_DAC_IRQHandler() {
 
 }
 
+void USART1_IRQHandler() {
+	//clear interrupt pending flag
+
+
+
+}
+
+void EXTI4_15_IRQHandler() {
+	//interrupt for the coulomb counter (PC15)
+
+	EXTI->PR |= EXTI_PR_PIF15; //clear pending flag for interrupt
+
+	if (GPIOA->ODR & (1 << 5)) GPIOA->ODR &= ~(1 << 5);
+	else GPIOA->ODR |= (1 << 5);
+
+	coulomb_ticks++;
+
+}
 
 /* USER CODE END 1 */
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
