@@ -46,6 +46,8 @@ int tim6_update_count = 0;
 int comp_rising = 1;
 int steps = 0;
 int coulomb_ticks = 0;
+
+int tim6_sel = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -61,6 +63,7 @@ int coulomb_ticks = 0;
 /* External variables --------------------------------------------------------*/
 
 /* USER CODE BEGIN EV */
+
 
 /* USER CODE END EV */
 
@@ -176,22 +179,35 @@ void ADC1_COMP_IRQHandler(void)
 /* USER CODE BEGIN 1 */
 
 
+extern int motor_frequency;
 void TIM6_DAC_IRQHandler() {
 	//clear interrupt pending flag
 	TIM6->SR &= ~(TIM_SR_UIF);
 
-	if (tim6_update_count < 10) tim6_update_count++;
-	else {
-		//disable TIM6
-		TIM6->CR1 &= ~(TIM_CR1_CEN);
+	// for the step counter
+	if (tim6_sel == 0x0) {
+		if (tim6_update_count < 10) tim6_update_count++;
+		else {
+			//disable TIM6
+			TIM6->CR1 &= ~(TIM_CR1_CEN);
 
-		comp_rising = 1;
-		EXTI->IMR |= EXTI_IMR_IM22;
+			comp_rising = 1;
+			EXTI->IMR |= EXTI_IMR_IM22;
 
-		//reset update count
-		tim6_update_count = 0;
+			//reset update count
+			tim6_update_count = 0;
+		}
 	}
 
+	else if (tim6_sel == 0x1) {
+		//for use when the motor is running. used to see if the motor is stalling
+
+		motor_frequency = TIM22->CNT * 61 / 2;
+		TIM22->CNT = 0;
+
+		//GPIOB->ODR &= ~(1 << 12);
+
+	}
 }
 
 void USART1_IRQHandler() {

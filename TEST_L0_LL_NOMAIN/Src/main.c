@@ -67,6 +67,9 @@ static void MX_TIM2_Init(void);
 static void MX_ADC_Init(void);
 *//* USER CODE BEGIN PFP */
 
+#define TIM6_SEL_STEP_DEBOUNCER 0x0;
+#define TIM6_SEL_FREQ_SAMPLER 0x1;
+
 void wait_for_interrupt();
 void nano_wait(int);
 void test_h_bridge();
@@ -74,6 +77,13 @@ void test_encoder();
 void test_comparator();
 void test_uart();
 void test_coulomb_counter();
+void motor_driver_encoder();
+void start_encoder();
+void check_stall();
+void enable_frequency_sampler();
+
+int motor_frequency = 0;
+int motor_up = 0;
 
 /* USER CODE END PFP */
 
@@ -93,7 +103,11 @@ int main() {
 	//test_encoder();
 	//test_comparator();
 	//test_uart();
-	test_coulomb_counter();
+	//test_coulomb_counter();
+
+
+	start_encoder();
+	motor_driver_encoder();
 
 	/*General flow of program:
 	 * 1. Initialize peripherals. Especially the coulomb counter peripheral
@@ -103,6 +117,165 @@ int main() {
 	 * 4. Once the shoes are tight, the pressure sensor will trigger interrupts to count steps.
 	 *
 	 */
+
+}
+
+extern int tim6_sel;
+
+void enable_frequency_sampler() {
+	//uses timer 6 to sample the frequency.
+
+	motor_frequency = 0;
+	tim6_sel = TIM6_SEL_FREQ_SAMPLER;
+
+	//enable the timer 6 clock
+	RCC->APB1ENR |= RCC_APB1ENR_TIM6EN;
+
+	NVIC->ISER[0] |= 1 << TIM6_DAC_IRQn;
+
+	TIM6->DIER |= TIM_DIER_UIE;
+
+	TIM6->CR1 |= TIM_CR1_CEN;
+
+
+}
+
+void check_stall() {
+
+	if (motor_frequency > 800) {GPIOB->ODR |= 1 << 12; motor_up = 1;}
+
+	if (motor_frequency < 600 && motor_up == 1) {GPIOB->ODR &= ~(1 << 12); TIM2->CCR1 = 40;}
+	else return;
+}
+
+void start_encoder() {
+	//function to start the encoder timer counting the pulses
+
+	//set up timer 21 to count up using an external clock (the pulse train from the encoder)
+	//TIM 22 Ch 1 on PB4
+
+	RCC->IOPENR |= RCC_IOPENR_IOPBEN; //enable port b clock
+	RCC->APB2ENR |= RCC_APB2ENR_TIM22EN; //enable timer 22 clock
+
+	GPIOB->MODER &= ~(GPIO_MODER_MODE4); //AF mode (10)
+	GPIOB->MODER |= GPIO_MODER_MODE4_1;
+
+	GPIOB->AFR[0] &= ~(GPIO_AFRL_AFSEL4);
+	GPIOB->AFR[0] |= (0x4 << 16);	//Set the af of pb4 to 4 for TIM22 CH1
+
+	//From page 554 in programming manual
+	TIM22->CCMR1 &= ~(TIM_CCMR1_CC1S);
+	TIM22->CCMR1 |= TIM_CCMR1_CC1S_0;
+	TIM22->CCER &= ~(TIM_CCER_CC1P);
+	TIM22->CCER &= ~(TIM_CCER_CC1NP);
+	TIM22->SMCR |= TIM_SMCR_SMS;
+	TIM22->SMCR &= ~(TIM_SMCR_TS);
+	TIM22->SMCR |= TIM_SMCR_TS_2 | TIM_SMCR_TS_0;
+
+	TIM22->CCER |= TIM_CCER_CC1E;
+
+
+	TIM22->ARR = 645000;
+
+	TIM22->CR1 |= TIM_CR1_CEN; //enable counter
+	TIM22->EGR |= TIM_EGR_UG; //force update generation
+
+	//enable basic timer 6. Used to sample and reset the pulse count and convert it to an approximate frequency
+	enable_frequency_sampler();
+
+}
+
+//function to test the motor while fitting it to the shoe. Since I don't have a power supply anymore I'll need to use the encoder to automatically cut power to the motor when it starts to stall
+void motor_driver_encoder() {
+
+	//Going to use PB12 for led feedback for this since pa5 is being used
+	RCC->IOPENR |= RCC_IOPENR_IOPBEN;
+	GPIOB->MODER &= ~(GPIO_MODER_MODE12);
+	GPIOB->MODER |= GPIO_MODER_MODE12_0;
+	GPIOB->ODR |= ~(1 << 12);
+
+
+	//begin by enabling the clock to GPIO port PA5, which is the onboard red led.
+	RCC->IOPENR |= RCC_IOPENR_IOPAEN;
+
+
+	//****SET UP TIM2 CH1 AS PWM ON PA15*****//
+	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN; //enable timer 2 clock
+
+	/*GPIOA->MODER &= ~(GPIO_MODER_MODE15); //AF mode (10)
+	GPIOA->MODER |= GPIO_MODER_MODE15_1;
+
+	GPIOA->AFR[1] &= ~(GPIO_AFRH_AFSEL15);
+	GPIOA->AFR[1] |= (0x5 << 28);	//Set the af of pa15 to 2 for TIM2 CH1
+
+*/
+	TIM2->PSC = 1 - 1; //TIMER CLOCK = 16MHz / (PSC + 1) = 1MHz
+	TIM2->ARR = 40; //8 cycles per transition; period is (8 / 1MHz) * 2 = 16us
+	TIM2->CCR1 = 0; //CCRx = 7. since arr = 8, signal will be high for 7 / 8 of period, 87.5 % duty cycle, or 14us high out of 16us period
+
+	//One pwm signal will stay low (0% duty) the other will use pwm to control motor speed. Switching the two switches direction of the motor
+
+	TIM2->CCMR1 |= TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1PE; //SET oc1m to pwm mode 1. Also enable preload
+	TIM2->CCER |= TIM_CCER_CC1E; //enable output on OC1
+	TIM2->CR1 |= TIM_CR1_CMS_0 | TIM_CR1_CEN; //Center aligned mode, enable counter
+	TIM2->EGR |= TIM_EGR_UG; //force update generation
+
+
+	//****SET UP TIM2 CH1 AS PWM ON PA5*****//
+
+	/*GPIOA->MODER &= ~(GPIO_MODER_MODE5); //AF mode (10)
+	GPIOA->MODER |= GPIO_MODER_MODE5_1;
+
+	GPIOA->AFR[0] &= ~(GPIO_AFRL_AFSEL5);
+	GPIOA->AFR[0] |= 0x5 << (5 * 4);
+
+	GPIOA->MODER &= ~(GPIO_MODER_MODE15);
+	GPIOA->MODER |= GPIO_MODER_MODE15_0;
+	GPIOA->ODR |= 1 << 15;
+	 */
+
+	short clockwise = 1;
+	int ccrval = 32;
+	short up = 0;
+
+
+	if (clockwise == 0) {
+
+			GPIOA->MODER &= ~(GPIO_MODER_MODE5);
+			GPIOA->MODER |= GPIO_MODER_MODE5_0;
+			GPIOA->ODR |= 1 << 5;
+			GPIOA->MODER &= ~(GPIO_MODER_MODE15); //AF mode (10)
+			GPIOA->MODER |= GPIO_MODER_MODE15_1;
+			GPIOA->AFR[1] &= ~(GPIO_AFRH_AFSEL15);
+			GPIOA->AFR[1] |= (0x5 << 28);	//Set the af of pa0 to 2 for TIM2 CH1
+
+		}
+
+	else {
+
+
+
+			GPIOA->MODER &= ~(GPIO_MODER_MODE5); //AF mode (10)
+			GPIOA->MODER |= GPIO_MODER_MODE5_1;
+			GPIOA->AFR[0] &= ~(GPIO_AFRL_AFSEL5);
+			GPIOA->AFR[0] |= 0x5 << (5 * 4);	//Set the af of pa0 to 2 for TIM2 CH1
+
+			GPIOA->MODER &= ~(GPIO_MODER_MODE15);
+			GPIOA->MODER |= GPIO_MODER_MODE15_0;
+			GPIOA->ODR |= 1 << 15;
+		}
+
+
+		nano_wait(10000000);
+
+		//turn off the motor if it's stalling out
+
+		while (1) {
+			check_stall();
+			nano_wait(100000);
+			//if (TIM22->CNT > 50000) GPIOB->ODR &= ~(1 << 12);
+		}
+
 
 }
 
