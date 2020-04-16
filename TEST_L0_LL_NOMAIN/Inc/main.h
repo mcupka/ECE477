@@ -69,6 +69,27 @@ extern "C" {
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
+
+void wait_for_interrupt();
+void nano_wait(int);
+void test_h_bridge();
+void test_encoder();
+void test_comparator();
+void test_uart();
+void test_coulomb_counter();
+void motor_driver_encoder(int);
+void start_encoder();
+void check_stall();
+void enable_frequency_sampler();
+void initialize();
+void state_not_tight();
+void tighten();
+void synch();
+void state_tight();
+void untighten();
+
+
+
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */
@@ -127,6 +148,18 @@ void Error_Handler(void);
 #define MFX_I2C_SDA_Pin LL_GPIO_PIN_9
 #define MFX_I2C_SDA_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
+
+
+#define TIM6_SEL_STEP_DEBOUNCER 0x0
+#define TIM6_SEL_FREQ_SAMPLER 0x1
+
+#define STATE_INIT 		0
+#define STATE_NOTTIGHT 		1 
+#define STATE_TIGHT 		2
+#define STATE_TIGHTENING 	3
+#define STATE_SYNCHING 		4
+#define STATE_UNTIGHTENING  5
+
 
 /* USER CODE END Private defines */
 

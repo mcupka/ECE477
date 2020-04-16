@@ -67,23 +67,22 @@ static void MX_TIM2_Init(void);
 static void MX_ADC_Init(void);
 *//* USER CODE BEGIN PFP */
 
-#define TIM6_SEL_STEP_DEBOUNCER 0x0;
-#define TIM6_SEL_FREQ_SAMPLER 0x1;
 
-void wait_for_interrupt();
-void nano_wait(int);
-void test_h_bridge();
-void test_encoder();
-void test_comparator();
-void test_uart();
-void test_coulomb_counter();
-void motor_driver_encoder();
-void start_encoder();
-void check_stall();
-void enable_frequency_sampler();
+#define TIM6_SEL_STEP_DEBOUNCER 0x0
+#define TIM6_SEL_FREQ_SAMPLER 0x1
+#define DIR_TIGHTEN 0x0
+#define DIR_UNTIGHTEN 0x1
+
 
 int motor_frequency = 0;
 int motor_up = 0;
+int battery_ticks = 0;
+int flag_tighten = 0;
+int flag_untighten = 0;
+int stalled = 0;
+
+int state = STATE_INIT; //variable used to hold the state of the machine
+extern int tim6_sel;
 
 /* USER CODE END PFP */
 
@@ -97,6 +96,12 @@ int motor_up = 0;
   * @retval int
   */
 
+//----------------
+/* Port mappings:
+ * PC15: Coulomb counter interrupt
+ *  
+*/
+//---------------
 int main() {
 
 	//test_h_bridge();
@@ -104,10 +109,186 @@ int main() {
 	//test_comparator();
 	//test_uart();
 	//test_coulomb_counter();
+while (1) {
 
+	motor_frequency = 0;
+	motor_up = 0;
+	flag_tighten = 0;
+	flag_untighten = 0;
+	stalled = 0;
+
+	RCC->IOPENR |= RCC_IOPENR_IOPBEN;
+	GPIOB->MODER &= ~(GPIO_MODER_MODE12);
+	GPIOB->MODER |= GPIO_MODER_MODE12_0;
+	GPIOB->ODR &= ~(1 << 12);
+
+	GPIOB->MODER &= ~(GPIO_MODER_MODE5);
+	GPIOB->MODER |= GPIO_MODER_MODE5_0;
+	GPIOB->ODR &= ~(1 << 5);
+/*
+	//setup button to untighten the shoe. Go to sleep.
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
+	//set up pa2 for the untighten button
+	GPIOB->MODER &= ~(GPIO_MODER_MODE9);
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
+	SYSCFG->EXTICR[2] &= ~(SYSCFG_EXTICR3_EXTI9); //Choose PB9 as EXTI source
+	SYSCFG->EXTICR[2] |= SYSCFG_EXTICR3_EXTI9_PB; //Choose PB9 as EXTI source
+	NVIC->ISER[0] |= (1 << EXTI4_15_IRQn);
+	EXTI->RTSR |= EXTI_RTSR_RT9; //Falling edge triggered
+	EXTI->FTSR &= ~EXTI_FTSR_FT9;
+	EXTI->IMR |= EXTI_IMR_IM9; //unmask the interrupt
+*/
+
+
+	//Heel Pressure Sensor
+	GPIOB->MODER &= ~(GPIO_MODER_MODE3);
+	GPIOB->MODER |= GPIO_MODER_MODE3_0 | GPIO_MODER_MODE3_1; //11 analog mode
+	GPIOB->MODER &= ~(GPIO_MODER_MODE6);
+	GPIOB->MODER |= GPIO_MODER_MODE6_0 | GPIO_MODER_MODE6_1;
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //comparator shares a clock with the system configuration controller
+	COMP2->CSR &= ~(COMP_CSR_COMP2INPSEL);
+	COMP2->CSR |= (COMP_CSR_COMP2INPSEL_0 | COMP_CSR_COMP2INPSEL_1); //011 FOR PB6
+	COMP2->CSR &= ~(COMP_CSR_COMP2INNSEL);
+	COMP2->CSR |= COMP_CSR_COMP2INNSEL_0 | COMP_CSR_COMP2INNSEL_1 | COMP_CSR_COMP2INNSEL_2; //111 FOR PB3
+	COMP2->CSR |= COMP_CSR_COMP2POLARITY;
+	COMP2->CSR |= COMP_CSR_COMP2EN;
+	EXTI->IMR |= EXTI_IMR_IM22;
+	EXTI->FTSR |= EXTI_FTSR_FT22;
+	NVIC->ISER[0] |= 1 << ADC1_COMP_IRQn;
+
+	state = STATE_NOTTIGHT;
+	flag_tighten = 0;
+	while (flag_tighten == 0) {
+		wait_for_interrupt();
+		nano_wait(100);
+	}
+
+	//disable previous peripherals
+	COMP2->CSR &= ~(COMP_CSR_COMP2EN);
+	EXTI->IMR &= ~(EXTI_IMR_IM22);
+	NVIC->ISER[0] &= ~(1 << ADC1_COMP_IRQn);
+
+
+	//Pressure sensor on face of shoe
+	//GPIOB->MODER &= ~(GPIO_MODER_MODE3);
+	//GPIOB->MODER |= GPIO_MODER_MODE3_0 | GPIO_MODER_MODE3_1; //11 analog mode
+	GPIOB->MODER &= ~(GPIO_MODER_MODE7);
+	GPIOB->MODER |= GPIO_MODER_MODE7_0 | GPIO_MODER_MODE7_1;
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //comparator shares a clock with the system configuration controller
+	SYSCFG->CFGR3 |= SYSCFG_CFGR3_ENBUFLP_VREFINT_COMP | SYSCFG_CFGR3_EN_VREFINT;
+	COMP2->CSR &= ~(COMP_CSR_COMP2INPSEL);
+	COMP2->CSR |= COMP_CSR_COMP2INPSEL_2; //100 FOR PB7
+	COMP2->CSR &= ~(COMP_CSR_COMP2INNSEL);
+	//COMP2->CSR |= COMP_CSR_COMP2INNSEL_0 | COMP_CSR_COMP2INNSEL_1 | COMP_CSR_COMP2INNSEL_2; //111 FOR PB3
+	COMP2->CSR |= COMP_CSR_COMP2INNSEL_2 | COMP_CSR_COMP2INNSEL_0; //101 FOR 1/2 VREFINT
+	COMP2->CSR |= COMP_CSR_COMP2POLARITY;
+	COMP2->CSR |= COMP_CSR_COMP2EN;
 
 	start_encoder();
-	motor_driver_encoder();
+	motor_driver_encoder(DIR_TIGHTEN);
+
+	GPIOB->ODR |= (1 << 5); //signal that we are in the tightened state
+
+	//Disable previous peripherals
+	TIM22->CR1 &= ~TIM_CR1_CEN;
+	TIM6->CR1 &= ~TIM_CR1_CEN;
+	RCC->APB2ENR &= ~RCC_APB2ENR_TIM22EN;
+	RCC->APB1ENR &= ~RCC_APB1ENR_TIM6EN;
+
+	/*
+		//setup button to untighten the shoe. Go to sleep.
+		RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
+		//set up pa2 for the untighten button
+		GPIOB->MODER &= ~(GPIO_MODER_MODE9);
+		RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
+		SYSCFG->EXTICR[2] &= ~(SYSCFG_EXTICR3_EXTI9); //Choose PB9 as EXTI source
+		SYSCFG->EXTICR[2] |= SYSCFG_EXTICR3_EXTI9_PB; //Choose PB9 as EXTI source
+		NVIC->ISER[0] |= (1 << EXTI4_15_IRQn);
+		EXTI->RTSR |= EXTI_RTSR_RT9; //Falling edge triggered
+		EXTI->FTSR &= ~EXTI_FTSR_FT9;
+		EXTI->IMR |= EXTI_IMR_IM9; //unmask the interrupt
+	*/
+
+
+	//Enable the untighten button interrupt
+	GPIOB->MODER &= ~(GPIO_MODER_MODE9);
+	//RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
+	//SYSCFG->EXTICR[2] &= ~(SYSCFG_EXTICR3_EXTI9); //Choose PB9 as EXTI source
+	//SYSCFG->EXTICR[2] |= SYSCFG_EXTICR3_EXTI9_PB; //Choose PB9 as EXTI source
+	//NVIC->ISER[0] |= (1 << EXTI4_15_IRQn);
+	//EXTI->RTSR |= EXTI_RTSR_RT9; //Falling edge triggered
+	//EXTI->FTSR &= ~EXTI_FTSR_FT9;
+//	EXTI->IMR |= EXTI_IMR_IM9; //unmask the interrupt
+
+	//wait for untighten interrupt
+	while (GPIOB->IDR & (1 << 9)) {//flag_untighten == 0) {
+		//wait_for_interrupt();
+		nano_wait(100);
+	}
+
+	//EXTI->IMR &= ~EXTI_IMR_IM9;
+	//NVIC->ISER[0] &= ~(1 << EXTI4_15_IRQn);
+
+	motor_up = 0;
+
+	int debounce = 1;
+	while (debounce > 0) {
+		debounce = 0;
+		for (int x = 0; x < 100; x++) {
+			nano_wait(10);
+			if ((GPIOB->IDR & (1 << 9)) == 0) {debounce += 1;}// GPIOB->ODR |= (1 << 12);}
+			//else GPIOB->ODR &= ~(1 << 12);
+		}
+	}
+
+	GPIOB->ODR |= (1 << 12);
+
+	nano_wait(10000);
+
+	//Disable the untighten button interrupt
+	EXTI->IMR &= ~(EXTI_IMR_IM9);
+
+	GPIOB->ODR &= ~(1 << 5);
+	start_encoder();
+	motor_driver_encoder(DIR_UNTIGHTEN);
+
+}
+
+	return 0;
+
+	//GPIOB->ODR |= 1 << 5;
+
+	initialize(); //will setup things like the coulomb counter and initial state of the system
+
+	while (1) {
+		//main loop
+		
+		switch (state) {
+			
+			case STATE_NOTTIGHT:
+				state_not_tight(); //will setup sensors to wait for a tighten request or synch request
+				//wait_for_interrupt(); //put processor to sleep until an interrupt occurs
+			break;
+			case STATE_TIGHT:
+				//GPIOB->ODR |= 1 << 9;
+				state_tight();
+			break;
+			case STATE_TIGHTENING:
+				tighten(); //will go through procedure to tighten shoe until the shoe is tight and put the shoe into the STATE_TIGHT state
+			break;
+			case STATE_SYNCHING:
+				synch();  //will go through procedure to synch the step count of the shoe and put the shoe back into the previous state
+			break;
+			default:
+			//error, unrecognized state
+			return 1;
+			break;
+		}
+	}
+
+
+	//start_encoder();
+	//motor_driver_encoder();
 
 	/*General flow of program:
 	 * 1. Initialize peripherals. Especially the coulomb counter peripheral
@@ -120,7 +301,202 @@ int main() {
 
 }
 
-extern int tim6_sel;
+void synch() {
+	//communicate over uart with the nrf52 to synch the step count and battery life to the android application
+	
+}
+
+void untighten() {
+	//reverse the motor to untighten the shoe.
+	state = STATE_UNTIGHTENING;
+	nano_wait(10000000);
+	GPIOB->ODR |= 1 << 12;
+	start_encoder();
+	motor_driver_encoder(DIR_UNTIGHTEN);
+	state = STATE_NOTTIGHT;
+	return;
+}
+
+void state_tight () {
+	//setup the pressure sensor to count steps, wait for button press to untighten or to synch the shoe
+
+
+	//setup button to untighten the shoe. Go to sleep.
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
+	SYSCFG->EXTICR[0] &= ~(SYSCFG_EXTICR1_EXTI2); //Choose PA2 as EXTI source on EXTI line 2
+	SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI2_PA;
+
+	//set up pa2 for the untighten button
+	RCC->IOPENR |= RCC_IOPENR_IOPAEN;
+	GPIOA->MODER &= ~(GPIO_MODER_MODE2);
+	GPIOA->MODER |= GPIO_MODER_MODE2_0;
+	NVIC_EnableIRQ(EXTI2_3_IRQn);
+	EXTI->RTSR |= EXTI_RTSR_RT2; //Falling edge triggered
+	EXTI->IMR |= EXTI_IMR_IM2; //unmask the interrupt
+
+	GPIOB->ODR |= 1 << 5;
+	while (1) {
+		if (flag_untighten == 1) {
+			GPIOB->ODR &= ~(1 << 5);
+			untighten();
+			state = STATE_NOTTIGHT;
+			return;
+		}
+		else wait_for_interrupt();
+		nano_wait(10000);
+	}
+}
+
+void tighten() {
+	//setup 2nd pressure sensor and magnetic encoder for tightening procedure. tighten the shoe.
+	GPIOB->ODR |= 1 << 12;
+	start_encoder();
+	motor_driver_encoder(DIR_TIGHTEN);
+	state = STATE_TIGHT;
+	return;
+}
+
+void state_not_tight() {
+	int x;
+
+	//set up the pressure sensor to trigger interrupt
+
+	//configure PB3 and PB6 as analog inputs to the comparator 2
+	RCC->IOPENR |= RCC_IOPENR_IOPBEN;
+
+	GPIOB->MODER &= ~(GPIO_MODER_MODE3);
+	GPIOB->MODER |= GPIO_MODER_MODE3_0 | GPIO_MODER_MODE3_1; //11 analog mode
+	GPIOB->MODER &= ~(GPIO_MODER_MODE6);
+	GPIOB->MODER |= GPIO_MODER_MODE6_0 | GPIO_MODER_MODE6_1;
+
+	//configure pa4 as analog input for comparator 1
+	GPIOA->MODER &= ~(GPIO_MODER_MODE4);
+	GPIOA->MODER |= GPIO_MODER_MODE4_0 | GPIO_MODER_MODE4_1;
+
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //comparator shares a clock with the system configuration controller
+
+
+	//comarator 2 setup
+	COMP2->CSR &= ~(COMP_CSR_COMP2INPSEL);
+	COMP2->CSR |= (COMP_CSR_COMP2INPSEL_0 | COMP_CSR_COMP2INPSEL_1); //011 FOR PB6
+
+	COMP2->CSR &= ~(COMP_CSR_COMP2INNSEL);
+	COMP2->CSR |= COMP_CSR_COMP2INNSEL_0 | COMP_CSR_COMP2INNSEL_1 | COMP_CSR_COMP2INNSEL_2; //111 FOR PB3
+
+	COMP2->CSR |= COMP_CSR_COMP2POLARITY;
+
+	COMP2->CSR |= COMP_CSR_COMP2EN;
+
+	//enable timer and interrupt that we will use to "debounce" the interrupt for the pressure sensor
+	//TIMER 6
+	//RCC->APB1ENR |= RCC_APB1ENR_TIM6EN;
+
+	//enable intrerrupt on exti line 22 (comparator 2)
+	EXTI->IMR |= EXTI_IMR_IM22;
+	//EXTI->RTSR |= EXTI_RTSR_RT22;
+	EXTI->FTSR |= EXTI_FTSR_FT22;
+
+	NVIC->ISER[0] |= 1 << ADC1_COMP_IRQn;
+
+
+	//setup ADC to poll to make sure that the pressure sensor is actually being pressed enough and it's not just noise that triggers it
+	/*RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
+	RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
+	RCC->IOPENR |= RCC_IOPENR_IOPAEN;
+	RCC->CR |= RCC_CR_HSION;
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+
+	while ((RCC->CR & RCC_CR_HSIRDY) == 0);
+	//pb1 adc channel 7
+	GPIOA->MODER &= ~(GPIO_MODER_MODE7);
+	//GPIOA->MODER |= GPIO_MODER_MODE7_0 | GPIO_MODER_MODE7_1; //11 for analog mode
+
+	ADC1->CFGR2 |= ADC_CFGR2_CKMODE;
+
+	if ((ADC1->CR & ADC_CR_ADEN) != 0)
+	{
+		ADC1->CR |= ADC_CR_ADDIS;
+	}
+
+	ADC1->CR |= ADC_CR_ADCAL;
+	while ((ADC1->ISR & ADC_ISR_EOCAL) == 0){}
+	ADC1->ISR |= ADC_ISR_EOCAL;
+
+	ADC1->ISR |= ADC_ISR_ADRDY;
+
+
+	ADC1->CR |= ADC_CR_ADEN;
+	if ((ADC1->CFGR1 & ADC_CFGR1_AUTOFF) == 0)
+	{
+		while ((ADC1->ISR & ADC_ISR_ADRDY) == 0) {}
+	}
+
+	ADC1->CHSELR = ADC_CHSELR_CHSEL7;
+	ADC1->SMPR |= ADC_SMPR_SMP_0 | ADC_SMPR_SMP_1 | ADC_SMPR_SMP_2;
+	ADC->CCR |= ADC_CCR_VREFEN;
+
+	ADC1->CHSELR = 1 << 0;
+    while(!(ADC1->ISR & ADC_ISR_ADRDY)) {};
+    ADC1->CR |= ADC_CR_ADSTART;
+    while(!(ADC1->ISR & ADC_ISR_EOC)) {};
+/*
+	while (1) {
+		if (ADC1->DR > 400) tighten(); else GPIOB->ODR &= ~(1 << 12);
+		ADC1->CR |= ADC_CR_ADSTART;
+		//nano_wait(10000);
+		while ((ADC1->ISR & ADC_ISR_EOC) == 0) {}
+	}
+*/
+//ADC1->CR &= ~(ADC_CR_ADEN);
+
+    flag_tighten = 0;
+	while(1) {
+		wait_for_interrupt();
+		if (flag_tighten == 0) {
+			//GPIOB->ODR &= ~(1 << 12);
+		}
+		else {
+			//x = 1000;
+			//for (int i = 0; i < 1000; i++) {
+			//	if (COMP2->CSR & COMP_CSR_COMP2VALUE) x -= 1;
+			//	nano_wait(10);
+			//}
+			//if (x > 900) tighten();
+			//flag_tighten = 0;
+			//EXTI->IMR |= EXTI_IMR_IM22;
+			state = STATE_TIGHTENING;
+			return;
+		}
+	}
+
+	return;
+
+}
+
+void initialize() {
+	
+	//This function needs to: setup coulbomb counter
+
+	//Setup coulbomb counter	
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
+	SYSCFG->EXTICR[3] &= ~(SYSCFG_EXTICR4_EXTI15); //Choose PC15 as EXTI source
+	SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI15_PC; 
+
+	RCC->IOPENR |= RCC_IOPENR_IOPCEN;
+
+	GPIOC->MODER &= ~GPIO_MODER_MODE15; //00 for input mode
+
+	NVIC_EnableIRQ(EXTI4_15_IRQn);
+
+	EXTI->FTSR |= EXTI_FTSR_FT15; //Falling edge triggered
+	EXTI->IMR |= EXTI_IMR_IM15; //unmask the interrupt
+
+	state = STATE_NOTTIGHT;
+	battery_ticks = 0;
+
+	return;
+}
+
 
 void enable_frequency_sampler() {
 	//uses timer 6 to sample the frequency.
@@ -142,9 +518,9 @@ void enable_frequency_sampler() {
 
 void check_stall() {
 
-	if (motor_frequency > 800) {GPIOB->ODR |= 1 << 12; motor_up = 1;}
+	if (motor_frequency > 700) {GPIOB->ODR |= 1 << 12; motor_up = 1;}
 
-	if (motor_frequency < 600 && motor_up == 1) {GPIOB->ODR &= ~(1 << 12); TIM2->CCR1 = 40;}
+	if (motor_frequency < 600 && motor_up == 1) {GPIOB->ODR &= ~(1 << 12); TIM2->CCR1 = 40; stalled = 1;}
 	else return;
 }
 
@@ -186,94 +562,81 @@ void start_encoder() {
 }
 
 //function to test the motor while fitting it to the shoe. Since I don't have a power supply anymore I'll need to use the encoder to automatically cut power to the motor when it starts to stall
-void motor_driver_encoder() {
+void motor_driver_encoder(int direction) {
+
 
 	//Going to use PB12 for led feedback for this since pa5 is being used
 	RCC->IOPENR |= RCC_IOPENR_IOPBEN;
 	GPIOB->MODER &= ~(GPIO_MODER_MODE12);
 	GPIOB->MODER |= GPIO_MODER_MODE12_0;
-	GPIOB->ODR |= ~(1 << 12);
+	GPIOB->ODR &= ~(1 << 12);
 
-
-	//begin by enabling the clock to GPIO port PA5, which is the onboard red led.
 	RCC->IOPENR |= RCC_IOPENR_IOPAEN;
 
 
-	//****SET UP TIM2 CH1 AS PWM ON PA15*****//
-	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN; //enable timer 2 clock
+	short clockwise = direction;
 
-	/*GPIOA->MODER &= ~(GPIO_MODER_MODE15); //AF mode (10)
-	GPIOA->MODER |= GPIO_MODER_MODE15_1;
+	if (clockwise == 0x1) {
 
-	GPIOA->AFR[1] &= ~(GPIO_AFRH_AFSEL15);
-	GPIOA->AFR[1] |= (0x5 << 28);	//Set the af of pa15 to 2 for TIM2 CH1
+		GPIOA->MODER &= ~(GPIO_MODER_MODE5);
+		GPIOA->MODER |= GPIO_MODER_MODE5_0;
+		GPIOA->ODR &= ~(1 << 5);
 
-*/
-	TIM2->PSC = 1 - 1; //TIMER CLOCK = 16MHz / (PSC + 1) = 1MHz
-	TIM2->ARR = 40; //8 cycles per transition; period is (8 / 1MHz) * 2 = 16us
-	TIM2->CCR1 = 0; //CCRx = 7. since arr = 8, signal will be high for 7 / 8 of period, 87.5 % duty cycle, or 14us high out of 16us period
-
-	//One pwm signal will stay low (0% duty) the other will use pwm to control motor speed. Switching the two switches direction of the motor
-
-	TIM2->CCMR1 |= TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1PE; //SET oc1m to pwm mode 1. Also enable preload
-	TIM2->CCER |= TIM_CCER_CC1E; //enable output on OC1
-	TIM2->CR1 |= TIM_CR1_CMS_0 | TIM_CR1_CEN; //Center aligned mode, enable counter
-	TIM2->EGR |= TIM_EGR_UG; //force update generation
-
-
-	//****SET UP TIM2 CH1 AS PWM ON PA5*****//
-
-	/*GPIOA->MODER &= ~(GPIO_MODER_MODE5); //AF mode (10)
-	GPIOA->MODER |= GPIO_MODER_MODE5_1;
-
-	GPIOA->AFR[0] &= ~(GPIO_AFRL_AFSEL5);
-	GPIOA->AFR[0] |= 0x5 << (5 * 4);
-
-	GPIOA->MODER &= ~(GPIO_MODER_MODE15);
-	GPIOA->MODER |= GPIO_MODER_MODE15_0;
-	GPIOA->ODR |= 1 << 15;
-	 */
-
-	short clockwise = 1;
-	int ccrval = 32;
-	short up = 0;
-
-
-	if (clockwise == 0) {
-
-			GPIOA->MODER &= ~(GPIO_MODER_MODE5);
-			GPIOA->MODER |= GPIO_MODER_MODE5_0;
-			GPIOA->ODR |= 1 << 5;
-			GPIOA->MODER &= ~(GPIO_MODER_MODE15); //AF mode (10)
-			GPIOA->MODER |= GPIO_MODER_MODE15_1;
-			GPIOA->AFR[1] &= ~(GPIO_AFRH_AFSEL15);
-			GPIOA->AFR[1] |= (0x5 << 28);	//Set the af of pa0 to 2 for TIM2 CH1
+		GPIOA->MODER &= ~(GPIO_MODER_MODE15);
+		GPIOA->MODER |= GPIO_MODER_MODE15_0;
+		GPIOA->ODR |= 1 << 15;
 
 		}
 
 	else {
 
+		GPIOA->MODER &= ~(GPIO_MODER_MODE5);
+		GPIOA->MODER |= GPIO_MODER_MODE5_0;
+		GPIOA->ODR |= 1 << 5;
 
+		GPIOA->MODER &= ~(GPIO_MODER_MODE15);
+		GPIOA->MODER |= GPIO_MODER_MODE15_0;
+		GPIOA->ODR &= ~(1 << 15);
 
-			GPIOA->MODER &= ~(GPIO_MODER_MODE5); //AF mode (10)
-			GPIOA->MODER |= GPIO_MODER_MODE5_1;
-			GPIOA->AFR[0] &= ~(GPIO_AFRL_AFSEL5);
-			GPIOA->AFR[0] |= 0x5 << (5 * 4);	//Set the af of pa0 to 2 for TIM2 CH1
-
-			GPIOA->MODER &= ~(GPIO_MODER_MODE15);
-			GPIOA->MODER |= GPIO_MODER_MODE15_0;
-			GPIOA->ODR |= 1 << 15;
 		}
 
+		stalled = 0;
 
-		nano_wait(10000000);
+		nano_wait(100000);
 
 		//turn off the motor if it's stalling out
-
 		while (1) {
-			check_stall();
-			nano_wait(100000);
-			//if (TIM22->CNT > 50000) GPIOB->ODR &= ~(1 << 12);
+			check_stall(); //check for real stall
+			if (((GPIOB->IDR & (1 << 9)) == 0) && (direction == DIR_UNTIGHTEN)) stalled = 1; //check for button press if untightening
+			if (((COMP2->CSR & COMP_CSR_COMP2VALUE) == 0) && (direction == DIR_TIGHTEN)) { //check for pressure sufficient if tightening
+				//account for noise
+					if (COMP2->CSR & COMP_CSR_COMP2VALUE);
+					else {
+							int deb = 0;
+							for (int a = 0; a < 1000; a++)
+							{
+								if (COMP2->CSR & COMP_CSR_COMP2VALUE) deb++;
+								nano_wait(10);
+
+							}
+							if (deb < 100) stalled = 1;
+					}
+			}
+			nano_wait(10000);
+			if (stalled == 1) {
+
+				GPIOA->ODR &= ~(1 << 5);
+				GPIOA->ODR &= ~(1 << 15);
+
+
+				//GPIOA->MODER |= GPIO_MODER_MODE5;
+				//GPIOA->MODER |= GPIO_MODER_MODE15;
+
+				stalled = 0;
+				GPIOB->ODR &= ~(1 << 12);
+
+				return;
+			}
 		}
 
 

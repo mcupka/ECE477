@@ -45,9 +45,13 @@
 int tim6_update_count = 0;
 int comp_rising = 1;
 int steps = 0;
-int coulomb_ticks = 0;
+extern int battery_ticks;
+extern int state;
+extern int flag_tighten;
 
 int tim6_sel = 0;
+int debounce_int = 0;
+int debounce_count = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -150,35 +154,82 @@ void SysTick_Handler(void)
   */
 void ADC1_COMP_IRQHandler(void)
 {
-	if (comp_rising == 1) {
-			EXTI->IMR &= ~(EXTI_IMR_IM22); //disable interrupt
-			EXTI->PR |= EXTI_PR_PIF22; //clear pending flag for interrupt
+	int debounce;
 
-			EXTI->IMR |= EXTI_IMR_IM21; //enable lower bound interrupt
-			comp_rising = 0;
+	//count steps if the shoe is tightened already
+	if (state == STATE_TIGHT) {
+		if (comp_rising == 1) {
+				EXTI->IMR &= ~(EXTI_IMR_IM22); //disable interrupt
+				EXTI->PR |= EXTI_PR_PIF22; //clear pending flag for interrupt
+
+				EXTI->IMR |= EXTI_IMR_IM21; //enable lower bound interrupt
+				comp_rising = 0;
+			}
+		else {
+				EXTI->IMR &= ~(EXTI_IMR_IM21); //disable lower bound interrupt
+				EXTI->PR |= EXTI_PR_PIF21; //clear pending flag for interrupt
+
+				//if (GPIOA->ODR & (1 << 5)) GPIOA->ODR &= ~(1 << 5); //turn red led off (debugging)
+				//else GPIOA->ODR |= 1 << 5;
+				steps++;
+
+				TIM6->CR1 |= TIM_CR1_CEN; //enable timer to count before another step may be counted
+			}
 	}
+	
+	//detect pressure to tighten shoe if shoe is not tightened
+	else if (state == STATE_NOTTIGHT) {
+		EXTI->IMR &= ~(EXTI_IMR_IM22);
+		//EXTI->IMR &= ~(EXTI_IMR_IM21);
+		EXTI->PR |= EXTI_PR_PIF22; //clear pending flag
+
+
+		int x = 1000;
+		for (int i = 0; i < 1000; i++) {
+			if (COMP2->CSR & COMP_CSR_COMP2VALUE) x -= 1;
+			nano_wait(10);
+		}
+		if (x > 900) flag_tighten = 1;
+
+		EXTI->IMR |= EXTI_IMR_IM22;
+
+		//flag_tighten = 1;
+		//debounce = 1;
+
+		//nano_wait(10000);
+
+		//for (int i = 0; i < 100; i++) {
+
+			//if (COMP2->CSR & COMP_CSR_COMP2VALUE) {
+
+			//}
+			//else {debounce = 0; break;}
+
+
+			//nano_wait(10000);
+		//}
+
+		//if (debounce == 1) tighten();
+
+
+		/*
+		tim6_sel = 0x2; //set timer 6 to be used for this purpose
+		debounce_count = 0;
+		debounce_int = 0;
+		TIM6->CR1 |= TIM_CR1_CEN; ///enable timer 6 to poll the comparator several times, "debouncing" the pressure sensor
+	*/
+	}
+
 	else {
-			EXTI->IMR &= ~(EXTI_IMR_IM21); //disable lower bound interrupt
-			EXTI->PR |= EXTI_PR_PIF21; //clear pending flag for interrupt
-
-			//if (GPIOA->ODR & (1 << 5)) GPIOA->ODR &= ~(1 << 5); //turn red led off (debugging)
-			//else GPIOA->ODR |= 1 << 5;
-			steps++;
-
-			TIM6->CR1 |= TIM_CR1_CEN; //enable timer to count before another step may be counted
+	//do nothing
+	return;
 	}
 
-
-  /* USER CODE END ADC1_COMP_IRQn 0 */
-  
-  /* USER CODE BEGIN ADC1_COMP_IRQn 1 */
-
-  /* USER CODE END ADC1_COMP_IRQn 1 */
 }
 
-/* USER CODE BEGIN 1 */
 
-
+extern int motor_up;
+extern int stalled;
 extern int motor_frequency;
 void TIM6_DAC_IRQHandler() {
 	//clear interrupt pending flag
@@ -199,14 +250,36 @@ void TIM6_DAC_IRQHandler() {
 		}
 	}
 
+
 	else if (tim6_sel == 0x1) {
 		//for use when the motor is running. used to see if the motor is stalling
 
 		motor_frequency = TIM22->CNT * 61 / 2;
+		if ((motor_frequency < 600) & (motor_up == 1)) {stalled = 1;}
 		TIM22->CNT = 0;
 
 		//GPIOB->ODR &= ~(1 << 12);
 
+	}
+	else if (tim6_sel == 0x2) {
+		//Used to detect the inital pressure from a person putting their foot in the shoe. This will cause the shoe to tighten
+
+		//shift comparator value into the debounce int. when it == 0xFFFFFFFF, the pressure is detected		
+		if (COMP2->CSR & COMP_CSR_COMP2VALUE) debounce_int = (debounce_int << 1);
+		else  debounce_int = ((debounce_int << 0x1) | 0x1);
+
+		debounce_count += 1;
+
+		if (debounce_int == 0xFFFFFFFF) {
+			//begin tightening shoe
+			tighten();
+		}
+
+		else if (debounce_count > 300) {
+			//false positive, don't tighten the shoe. redisable this interrupt and enable the other one
+			TIM6->CR1 &= ~(TIM_CR1_CEN);
+			EXTI->IMR |= EXTI_IMR_IM22; 
+		}
 	}
 }
 
@@ -217,17 +290,38 @@ void USART1_IRQHandler() {
 
 }
 
+extern int flag_untighten;
 void EXTI4_15_IRQHandler() {
 	//interrupt for the coulomb counter (PC15)
 
-	EXTI->PR |= EXTI_PR_PIF15; //clear pending flag for interrupt
+	if (EXTI->PR & EXTI_PR_PIF15) {
+		EXTI->PR |= EXTI_PR_PIF15; //clear pending flag for interrupt
 
-	if (GPIOA->ODR & (1 << 5)) GPIOA->ODR &= ~(1 << 5);
-	else GPIOA->ODR |= (1 << 5);
+		if (GPIOA->ODR & (1 << 5)) GPIOA->ODR &= ~(1 << 5);
+		else GPIOA->ODR |= (1 << 5);
 
-	coulomb_ticks++;
+		battery_ticks++;
+	}
+	else if ((EXTI->PR & EXTI_PR_PIF9) != 0) {
+		//untighten button
+		EXTI->PR |= EXTI_PR_PIF9; //clear pending flag for interrupt
+
+		flag_untighten = 1;
+
+	}
+}
+
+
+
+void EXTI2_3_IRQHandler() {
+}
+
+
+void EXTI0_1_IRQHandler() {
 
 }
+
+
 
 /* USER CODE END 1 */
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
