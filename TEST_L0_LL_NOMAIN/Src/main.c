@@ -80,6 +80,7 @@ int battery_ticks = 0;
 int flag_tighten = 0;
 int flag_untighten = 0;
 int stalled = 0;
+int step_count = 0;
 
 int state = STATE_INIT; //variable used to hold the state of the machine
 extern int tim6_sel;
@@ -109,7 +110,11 @@ int main() {
 	//test_comparator();
 	//test_uart();
 	//test_coulomb_counter();
+
+	initialize();
+
 while (1) {
+
 
 	motor_frequency = 0;
 	motor_up = 0;
@@ -125,20 +130,6 @@ while (1) {
 	GPIOB->MODER &= ~(GPIO_MODER_MODE5);
 	GPIOB->MODER |= GPIO_MODER_MODE5_0;
 	GPIOB->ODR &= ~(1 << 5);
-/*
-	//setup button to untighten the shoe. Go to sleep.
-	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
-	//set up pa2 for the untighten button
-	GPIOB->MODER &= ~(GPIO_MODER_MODE9);
-	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
-	SYSCFG->EXTICR[2] &= ~(SYSCFG_EXTICR3_EXTI9); //Choose PB9 as EXTI source
-	SYSCFG->EXTICR[2] |= SYSCFG_EXTICR3_EXTI9_PB; //Choose PB9 as EXTI source
-	NVIC->ISER[0] |= (1 << EXTI4_15_IRQn);
-	EXTI->RTSR |= EXTI_RTSR_RT9; //Falling edge triggered
-	EXTI->FTSR &= ~EXTI_FTSR_FT9;
-	EXTI->IMR |= EXTI_IMR_IM9; //unmask the interrupt
-*/
-
 
 	//Heel Pressure Sensor
 	GPIOB->MODER &= ~(GPIO_MODER_MODE3);
@@ -170,8 +161,6 @@ while (1) {
 
 
 	//Pressure sensor on face of shoe
-	//GPIOB->MODER &= ~(GPIO_MODER_MODE3);
-	//GPIOB->MODER |= GPIO_MODER_MODE3_0 | GPIO_MODER_MODE3_1; //11 analog mode
 	GPIOB->MODER &= ~(GPIO_MODER_MODE7);
 	GPIOB->MODER |= GPIO_MODER_MODE7_0 | GPIO_MODER_MODE7_1;
 	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //comparator shares a clock with the system configuration controller
@@ -179,8 +168,10 @@ while (1) {
 	COMP2->CSR &= ~(COMP_CSR_COMP2INPSEL);
 	COMP2->CSR |= COMP_CSR_COMP2INPSEL_2; //100 FOR PB7
 	COMP2->CSR &= ~(COMP_CSR_COMP2INNSEL);
-	//COMP2->CSR |= COMP_CSR_COMP2INNSEL_0 | COMP_CSR_COMP2INNSEL_1 | COMP_CSR_COMP2INNSEL_2; //111 FOR PB3
-	COMP2->CSR |= COMP_CSR_COMP2INNSEL_2 | COMP_CSR_COMP2INNSEL_0; //101 FOR 1/2 VREFINT
+	COMP2->CSR |= COMP_CSR_COMP2INNSEL_0 | COMP_CSR_COMP2INNSEL_1 | COMP_CSR_COMP2INNSEL_2; //111 FOR PB3
+
+	//COMP2->CSR |= COMP_CSR_COMP2INNSEL_2 | COMP_CSR_COMP2INNSEL_0; //101 FOR 1/2 VREFINT
+
 	COMP2->CSR |= COMP_CSR_COMP2POLARITY;
 	COMP2->CSR |= COMP_CSR_COMP2EN;
 
@@ -195,51 +186,30 @@ while (1) {
 	RCC->APB2ENR &= ~RCC_APB2ENR_TIM22EN;
 	RCC->APB1ENR &= ~RCC_APB1ENR_TIM6EN;
 
-	/*
-		//setup button to untighten the shoe. Go to sleep.
-		RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
-		//set up pa2 for the untighten button
-		GPIOB->MODER &= ~(GPIO_MODER_MODE9);
-		RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
-		SYSCFG->EXTICR[2] &= ~(SYSCFG_EXTICR3_EXTI9); //Choose PB9 as EXTI source
-		SYSCFG->EXTICR[2] |= SYSCFG_EXTICR3_EXTI9_PB; //Choose PB9 as EXTI source
-		NVIC->ISER[0] |= (1 << EXTI4_15_IRQn);
-		EXTI->RTSR |= EXTI_RTSR_RT9; //Falling edge triggered
-		EXTI->FTSR &= ~EXTI_FTSR_FT9;
-		EXTI->IMR |= EXTI_IMR_IM9; //unmask the interrupt
-	*/
-
 
 	//Enable the untighten button interrupt
 	GPIOB->MODER &= ~(GPIO_MODER_MODE9);
-	//RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
-	//SYSCFG->EXTICR[2] &= ~(SYSCFG_EXTICR3_EXTI9); //Choose PB9 as EXTI source
-	//SYSCFG->EXTICR[2] |= SYSCFG_EXTICR3_EXTI9_PB; //Choose PB9 as EXTI source
-	//NVIC->ISER[0] |= (1 << EXTI4_15_IRQn);
-	//EXTI->RTSR |= EXTI_RTSR_RT9; //Falling edge triggered
-	//EXTI->FTSR &= ~EXTI_FTSR_FT9;
-//	EXTI->IMR |= EXTI_IMR_IM9; //unmask the interrupt
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
+	SYSCFG->EXTICR[2] &= ~(SYSCFG_EXTICR3_EXTI9); //Choose PB9 as EXTI source
+	SYSCFG->EXTICR[2] |= SYSCFG_EXTICR3_EXTI9_PB; //Choose PB9 as EXTI source
+	NVIC->ISER[0] |= (1 << EXTI4_15_IRQn);
+	EXTI->RTSR |= EXTI_RTSR_RT9; //Falling edge triggered
+	EXTI->FTSR &= ~EXTI_FTSR_FT9;
+	EXTI->IMR |= EXTI_IMR_IM9; //unmask the interrupt
 
 	//wait for untighten interrupt
-	while (GPIOB->IDR & (1 << 9)) {//flag_untighten == 0) {
-		//wait_for_interrupt();
+	flag_untighten = 0;
+	while (flag_untighten == 0) {
+		wait_for_interrupt();
 		nano_wait(100);
 	}
 
-	//EXTI->IMR &= ~EXTI_IMR_IM9;
-	//NVIC->ISER[0] &= ~(1 << EXTI4_15_IRQn);
+
+	//disable the untighten button interrupt
+	EXTI->IMR &= ~EXTI_IMR_IM9;
+	NVIC->ISER[0] &= ~(1 << EXTI4_15_IRQn);
 
 	motor_up = 0;
-
-	int debounce = 1;
-	while (debounce > 0) {
-		debounce = 0;
-		for (int x = 0; x < 100; x++) {
-			nano_wait(10);
-			if ((GPIOB->IDR & (1 << 9)) == 0) {debounce += 1;}// GPIOB->ODR |= (1 << 12);}
-			//else GPIOB->ODR &= ~(1 << 12);
-		}
-	}
 
 	GPIOB->ODR |= (1 << 12);
 
@@ -298,6 +268,46 @@ while (1) {
 	 * 4. Once the shoes are tight, the pressure sensor will trigger interrupts to count steps.
 	 *
 	 */
+
+}
+
+void write_eeprom_data() {
+	//function to write saved data to the eeprom
+
+	//unlock the eeprom
+	while ((FLASH->SR & FLASH_SR_BSY) != 0);
+	if ((FLASH->PECR & FLASH_PECR_PELOCK) != 0)
+	{
+	 FLASH->PEKEYR = FLASH_PEKEY1;
+	 FLASH->PEKEYR = FLASH_PEKEY2;
+	}
+
+	//write to the eeprom
+	*(uint32_t *)(DATA_EEPROM_BASE + 0x4) = battery_ticks;
+	*(uint32_t *)(DATA_EEPROM_BASE + 0x8) = step_count;
+
+	//lock the eeprom
+	while ((FLASH->SR & FLASH_SR_BSY) != 0);
+	FLASH->PECR |= FLASH_PECR_PELOCK;
+}
+
+void get_eeprom_data() {
+	//function to get data from non-volatile memory
+
+	//unlock the eeprom
+	while ((FLASH->SR & FLASH_SR_BSY) != 0);
+	if ((FLASH->PECR & FLASH_PECR_PELOCK) != 0)
+	{
+	 FLASH->PEKEYR = FLASH_PEKEY1;
+	 FLASH->PEKEYR = FLASH_PEKEY2;
+	}
+	//read from the eeprom
+	battery_ticks = *(uint32_t *)(DATA_EEPROM_BASE + 0x4);
+	step_count = *(uint32_t *)(DATA_EEPROM_BASE + 0x8);
+
+	//lock the eeprom
+	while ((FLASH->SR & FLASH_SR_BSY) != 0);
+	FLASH->PECR |= FLASH_PECR_PELOCK;
 
 }
 
@@ -477,6 +487,8 @@ void initialize() {
 	
 	//This function needs to: setup coulbomb counter
 
+	get_eeprom_data(); //get the saved step count and battery life
+
 	//Setup coulbomb counter	
 	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
 	SYSCFG->EXTICR[3] &= ~(SYSCFG_EXTICR4_EXTI15); //Choose PC15 as EXTI source
@@ -492,7 +504,25 @@ void initialize() {
 	EXTI->IMR |= EXTI_IMR_IM15; //unmask the interrupt
 
 	state = STATE_NOTTIGHT;
-	battery_ticks = 0;
+
+	//setup the battery LED indicator
+	GPIOC->MODER &= ~(GPIO_MODER_MODE14);
+	GPIOC->MODER |= GPIO_MODER_MODE14_0;
+	GPIOC->ODR &= ~(1 << 14);
+
+	//setup interrupt to reset the battery charge
+	//Setup coulbomb counter
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
+	SYSCFG->EXTICR[3] &= ~(SYSCFG_EXTICR4_EXTI13); //Choose PB13 as EXTI source
+	SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI13_PB;
+
+	RCC->IOPENR |= RCC_IOPENR_IOPBEN;
+
+	GPIOB->MODER &= ~GPIO_MODER_MODE13; //00 for input mode
+
+	EXTI->FTSR |= EXTI_FTSR_FT13; //Falling edge triggered
+	EXTI->IMR |= EXTI_IMR_IM13; //unmask the interrupt
+
 
 	return;
 }
@@ -520,7 +550,7 @@ void check_stall() {
 
 	if (motor_frequency > 700) {GPIOB->ODR |= 1 << 12; motor_up = 1;}
 
-	if (motor_frequency < 600 && motor_up == 1) {GPIOB->ODR &= ~(1 << 12); TIM2->CCR1 = 40; stalled = 1;}
+	if (motor_frequency < 400 && motor_up == 1) {GPIOB->ODR &= ~(1 << 12); TIM2->CCR1 = 40; stalled = 1;}
 	else return;
 }
 
@@ -619,7 +649,7 @@ void motor_driver_encoder(int direction) {
 								nano_wait(10);
 
 							}
-							if (deb < 100) stalled = 1;
+							if (deb < 1) stalled = 1;
 					}
 			}
 			nano_wait(10000);
@@ -647,10 +677,10 @@ void test_coulomb_counter() {
 	//Coulomb counter connected to PC15. Using EXTI interrupt to count the pulses sent by the coulomb counter
 
 	//onboard led for testing feedback. pa5
-	RCC->IOPENR |= RCC_IOPENR_IOPAEN;
-	GPIOA->MODER &= ~(GPIO_MODER_MODE5);
-	GPIOA->MODER |= GPIO_MODER_MODE5_0;
-	GPIOA->ODR |= 1 << 5;
+	RCC->IOPENR |= RCC_IOPENR_IOPBEN;
+	GPIOB->MODER &= ~(GPIO_MODER_MODE12);
+	GPIOB->MODER |= GPIO_MODER_MODE12_0;
+	GPIOB->ODR |= 1 << 12;
 
 	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
 	SYSCFG->EXTICR[3] &= ~(SYSCFG_EXTICR4_EXTI15); //Choose PC15 as EXTI source
@@ -981,6 +1011,32 @@ void test_h_bridge() {
 
 
 }
+
+void test_eeprom(int after_power_off) {
+
+	RCC->IOPENR |= RCC_IOPENR_IOPBEN;
+	GPIOB->MODER &= ~(GPIO_MODER_MODE12);
+	GPIOB->MODER |= GPIO_MODER_MODE12_0;
+	GPIOB->ODR &= ~(1 << 12);
+	GPIOB->MODER &= ~(GPIO_MODER_MODE5);
+	GPIOB->MODER |= GPIO_MODER_MODE5_0;
+	GPIOB->ODR &= ~(1 << 5);
+
+
+	step_count = 1;
+
+	if (after_power_off == 0) {
+		//store data in eeprom
+		step_count = 9987;
+		write_eeprom_data();
+	}
+	else {
+		get_eeprom_data();
+		if (step_count == 9987) GPIOB->ODR |= (1 << 12);
+		else GPIOB->ODR |= (1 << 5);
+	}
+}
+
 //
 //
 ///**

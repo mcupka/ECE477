@@ -34,7 +34,7 @@ Src/%.o: ../Src/%.c
 	@echo 'Building file: $<'
 	@echo 'Invoking: MCU GCC Compiler'
 	@echo $(PWD)
-	arm-none-eabi-gcc -mcpu=cortex-m0plus -mthumb -mfloat-abi=soft -DUSE_FULL_LL_DRIVER -DUSE_HAL_DRIVER -DSTM32L053xx -I"//NAS01.ITAP.PURDUE.EDU/puhome/desktop/477/TEST_L0_LL_NOMAIN/Inc" -I"//NAS01.ITAP.PURDUE.EDU/puhome/desktop/477/TEST_L0_LL_NOMAIN/Drivers/STM32L0xx_HAL_Driver/Inc" -I"//NAS01.ITAP.PURDUE.EDU/puhome/desktop/477/TEST_L0_LL_NOMAIN/Drivers/STM32L0xx_HAL_Driver/Inc/Legacy" -I"//NAS01.ITAP.PURDUE.EDU/puhome/desktop/477/TEST_L0_LL_NOMAIN/Drivers/CMSIS/Device/ST/STM32L0xx/Include" -I"//NAS01.ITAP.PURDUE.EDU/puhome/desktop/477/TEST_L0_LL_NOMAIN/Drivers/CMSIS/Include"  -Og -g3 -Wall -fmessage-length=0 -ffunction-sections -c -fmessage-length=0 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$@" -o "$@" "$<"
+	arm-none-eabi-gcc -mcpu=cortex-m0plus -mthumb -mfloat-abi=soft -DUSE_FULL_LL_DRIVER -DUSE_HAL_DRIVER -DSTM32L053xx -I"C:/Users/micha/Desktop/477 Stuff/STM/ECE477/TEST_L0_LL_NOMAIN/Inc" -I"C:/Users/micha/Desktop/477 Stuff/STM/ECE477/TEST_L0_LL_NOMAIN/Drivers/STM32L0xx_HAL_Driver/Inc" -I"C:/Users/micha/Desktop/477 Stuff/STM/ECE477/TEST_L0_LL_NOMAIN/Drivers/STM32L0xx_HAL_Driver/Inc/Legacy" -I"C:/Users/micha/Desktop/477 Stuff/STM/ECE477/TEST_L0_LL_NOMAIN/Drivers/CMSIS/Device/ST/STM32L0xx/Include" -I"C:/Users/micha/Desktop/477 Stuff/STM/ECE477/TEST_L0_LL_NOMAIN/Drivers/CMSIS/Include"  -Og -g3 -Wall -fmessage-length=0 -ffunction-sections -c -fmessage-length=0 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$@" -o "$@" "$<"
 	@echo 'Finished building: $<'
 	@echo ' '
 

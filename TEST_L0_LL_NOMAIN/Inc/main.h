@@ -87,8 +87,9 @@ void tighten();
 void synch();
 void state_tight();
 void untighten();
-
-
+void get_eeprom_data();
+void write_eeprom_data();
+void test_eeprom(int);
 
 /* USER CODE BEGIN EFP */
 
@@ -159,6 +160,11 @@ void untighten();
 #define STATE_TIGHTENING 	3
 #define STATE_SYNCHING 		4
 #define STATE_UNTIGHTENING  5
+
+#define MAX_MAH 52000000
+#define MAH_PER_TICK 1707
+#define MAH_LEFT_GREEN 42000000 //defined as integers for quicker operations
+#define MAH_LEFT_RED 51999000
 
 
 /* USER CODE END Private defines */

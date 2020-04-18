@@ -297,17 +297,36 @@ void EXTI4_15_IRQHandler() {
 	if (EXTI->PR & EXTI_PR_PIF15) {
 		EXTI->PR |= EXTI_PR_PIF15; //clear pending flag for interrupt
 
-		if (GPIOA->ODR & (1 << 5)) GPIOA->ODR &= ~(1 << 5);
-		else GPIOA->ODR |= (1 << 5);
-
 		battery_ticks++;
+
+		if ((MAX_MAH - (battery_ticks * MAH_PER_TICK)) <= MAH_LEFT_RED) //turn on battery indicator led
+			GPIOC->ODR |= (1 << 14);
+	}
+	else if (EXTI->PR & EXTI_PR_PIF13) {
+		//battery charge count reset button
+		EXTI->PR |= EXTI_PR_PIF13; //clear pending flag for interrupt
+
+		battery_ticks = 0;
+		GPIOC->ODR &= ~(1 << 14);
+
 	}
 	else if ((EXTI->PR & EXTI_PR_PIF9) != 0) {
 		//untighten button
 		EXTI->PR |= EXTI_PR_PIF9; //clear pending flag for interrupt
+		EXTI->IMR &= ~(EXTI_IMR_IM9);
+
+		//debounce
+		int deb = 1;
+		while (deb > 0) {
+			deb = 0;
+			for (int x = 0; x < 100; x++) {
+				if ((GPIOB->IDR & (1 << 9)) == 0) deb++;
+				nano_wait(10);
+			}
+		}
 
 		flag_untighten = 1;
-
+		EXTI->IMR |= EXTI_IMR_IM9;
 	}
 }
 
