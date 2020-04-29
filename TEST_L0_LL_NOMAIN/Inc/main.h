@@ -164,7 +164,7 @@ void test_eeprom(int);
 #define MAX_MAH 52000000
 #define MAH_PER_TICK 1707
 #define MAH_LEFT_GREEN 42000000 //defined as integers for quicker operations
-#define MAH_LEFT_RED 51999000
+#define MAH_LEFT_RED 51997000
 
 
 /* USER CODE END Private defines */

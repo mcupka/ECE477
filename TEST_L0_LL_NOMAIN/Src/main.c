@@ -105,13 +105,28 @@ extern int tim6_sel;
 //---------------
 int main() {
 
+	//while(1) {
+	//	RCC->IOPENR |= RCC_IOPENR_IOPBEN;
+	//}
+
 	//test_h_bridge();
 	//test_encoder();
 	//test_comparator();
 	//test_uart();
 	//test_coulomb_counter();
+	//return 0;
+
+	RCC->IOPENR |= RCC_IOPENR_IOPBEN;
+	GPIOB->MODER &= ~(GPIO_MODER_MODE12);
+	GPIOB->MODER |= GPIO_MODER_MODE12_0;
+	GPIOB->ODR &= ~(1 << 12);
+
+	GPIOB->MODER &= ~(GPIO_MODER_MODE5);
+	GPIOB->MODER |= GPIO_MODER_MODE5_0;
+	GPIOB->ODR &= ~(1 << 5);
 
 	initialize();
+
 
 while (1) {
 
@@ -122,14 +137,6 @@ while (1) {
 	flag_untighten = 0;
 	stalled = 0;
 
-	RCC->IOPENR |= RCC_IOPENR_IOPBEN;
-	GPIOB->MODER &= ~(GPIO_MODER_MODE12);
-	GPIOB->MODER |= GPIO_MODER_MODE12_0;
-	GPIOB->ODR &= ~(1 << 12);
-
-	GPIOB->MODER &= ~(GPIO_MODER_MODE5);
-	GPIOB->MODER |= GPIO_MODER_MODE5_0;
-	GPIOB->ODR &= ~(1 << 5);
 
 	//Heel Pressure Sensor
 	GPIOB->MODER &= ~(GPIO_MODER_MODE3);
@@ -149,9 +156,11 @@ while (1) {
 
 	state = STATE_NOTTIGHT;
 	flag_tighten = 0;
+	GPIOB->ODR &= ~(1 << 5);
+	GPIOB->ODR &= ~(1 << 12);
 	while (flag_tighten == 0) {
+		SCB->SCR &= ~( SCB_SCR_SLEEPDEEP_Msk);
 		wait_for_interrupt();
-		nano_wait(100);
 	}
 
 	//disable previous peripherals
@@ -199,11 +208,13 @@ while (1) {
 
 	//wait for untighten interrupt
 	flag_untighten = 0;
-	while (flag_untighten == 0) {
-		wait_for_interrupt();
-		nano_wait(100);
-	}
 
+	GPIOB->ODR &= ~(1 << 5);
+	GPIOB->ODR &= ~(1 << 12);
+	while (flag_untighten == 0) {
+		SCB->SCR &= ~( SCB_SCR_SLEEPDEEP_Msk);
+		wait_for_interrupt();
+	}
 
 	//disable the untighten button interrupt
 	EXTI->IMR &= ~EXTI_IMR_IM9;
@@ -312,8 +323,58 @@ void get_eeprom_data() {
 }
 
 void synch() {
+
 	//communicate over uart with the nrf52 to synch the step count and battery life to the android application
-	
+		char test_message[8] = {'s', 'y', (char)100, (char)69, (char)(0x00), (char)(0x00), (char)(0x01), (char)(0xFF)};
+
+		char test_rx[6] = {0, 0, 0, 0, 0, 0};
+		char test_rx_expected[6] = "ledon\n";
+		short match = 0;
+
+		//Configure Pins
+		RCC->IOPENR |= RCC_IOPENR_IOPAEN;
+		GPIOA->MODER &= ~(GPIO_MODER_MODE9 | GPIO_MODER_MODE10);
+		GPIOA->MODER |= GPIO_MODER_MODE9_1 | GPIO_MODER_MODE10_1;
+		GPIOA->AFR[1] &= ~(GPIO_AFRH_AFSEL9 | GPIO_AFRH_AFSEL10);
+		GPIOA->AFR[1] |= 0x4 << 4; //usart1_tx pa9
+		GPIOA->AFR[1] |= 0x4 << 8; //usart1_rx pa10
+
+
+		RCC->APB2ENR |= RCC_APB2ENR_USART1EN; //enable usart1 clock
+
+		//Configure USART1 TX
+		/* (1) oversampling by 16, 9600 baud */
+		/* (2) 8 data bit, 1 start bit, 1 stop bit, no parity */
+		USART1->BRR = 2100000 / 115200; /* (1) */
+		USART1->CR1 |= USART_CR1_TE | USART_CR1_UE; /* (2) */
+
+		//Send data via TX
+		for (int a = 0; a < 8; a++) {
+			USART1->TDR = test_message[a];
+			while (!(USART1->ISR & USART_ISR_TC)); //wait for the transfer to be complete
+		}
+
+		//Enable the RX
+		USART1->CR1 |= USART_CR1_RE | USART_CR1_RXNEIE;
+
+		//Receive some data. if it matches the expected string, turn the onboard LED on
+		for (int a = 0; a < 6; a++) {
+			while (!((USART1->ISR & USART_ISR_RXNE) == USART_ISR_RXNE));
+			test_rx[a] = (uint8_t)(USART1->RDR); /* Receive data, clear flag */
+		}
+
+		for (int a = 0; a < 6; a++){
+			if (test_rx[a] == test_rx_expected[a]) match++;
+		}
+
+		if (match == 6) {
+			GPIOA->MODER &= ~(GPIO_MODER_MODE5);
+			GPIOA->MODER |= GPIO_MODER_MODE5_0;
+			GPIOA->ODR |= 1 << 5;
+		}
+
+		while (1);
+
 }
 
 void untighten() {
@@ -484,7 +545,7 @@ void state_not_tight() {
 }
 
 void initialize() {
-	
+
 	//This function needs to: setup coulbomb counter
 
 	get_eeprom_data(); //get the saved step count and battery life
@@ -523,7 +584,6 @@ void initialize() {
 	EXTI->FTSR |= EXTI_FTSR_FT13; //Falling edge triggered
 	EXTI->IMR |= EXTI_IMR_IM13; //unmask the interrupt
 
-
 	return;
 }
 
@@ -550,7 +610,7 @@ void check_stall() {
 
 	if (motor_frequency > 700) {GPIOB->ODR |= 1 << 12; motor_up = 1;}
 
-	if (motor_frequency < 400 && motor_up == 1) {GPIOB->ODR &= ~(1 << 12); TIM2->CCR1 = 40; stalled = 1;}
+	if (motor_frequency < 100 && motor_up == 1) {GPIOB->ODR &= ~(1 << 12); TIM2->CCR1 = 40; stalled = 1;}
 	else return;
 }
 
@@ -649,10 +709,11 @@ void motor_driver_encoder(int direction) {
 								nano_wait(10);
 
 							}
-							if (deb < 1) stalled = 1;
+							if (deb < 1) {stalled = 1; /*GPIOC->ODR &= ~(1 << 14);*/}
 					}
 			}
-			nano_wait(10000);
+
+			//nano_wait(10000);
 			if (stalled == 1) {
 
 				GPIOA->ODR &= ~(1 << 5);
