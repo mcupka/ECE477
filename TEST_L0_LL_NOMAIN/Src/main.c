@@ -79,6 +79,7 @@ int motor_up = 0;
 int battery_ticks = 0;
 int flag_tighten = 0;
 int flag_untighten = 0;
+int flag_sync = 0;
 int stalled = 0;
 int step_count = 0;
 
@@ -111,7 +112,10 @@ int main() {
 
 	//test_h_bridge();
 	//test_encoder();
+	//state = STATE_TIGHT;
 	//test_comparator();
+	//return 0;
+
 	//test_uart();
 	//test_coulomb_counter();
 	//return 0;
@@ -154,11 +158,23 @@ while (1) {
 	EXTI->FTSR |= EXTI_FTSR_FT22;
 	NVIC->ISER[0] |= 1 << ADC1_COMP_IRQn;
 
+	//enable sync button interrupt
+	GPIOB->MODER &= ~(GPIO_MODER_MODE8);
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable clock for sys config
+	SYSCFG->EXTICR[2] &= ~(SYSCFG_EXTICR3_EXTI8); //Choose PB9 as EXTI source
+	SYSCFG->EXTICR[2] |= SYSCFG_EXTICR3_EXTI8_PB; //Choose PB9 as EXTI source
+	NVIC->ISER[0] |= (1 << EXTI4_15_IRQn);
+	EXTI->RTSR |= EXTI_RTSR_RT8; //Falling edge triggered
+	EXTI->FTSR &= ~EXTI_FTSR_FT8;
+	EXTI->IMR |= EXTI_IMR_IM8; //unmask the interrupt
+
 	state = STATE_NOTTIGHT;
 	flag_tighten = 0;
+	flag_sync = 0;
 	GPIOB->ODR &= ~(1 << 5);
 	GPIOB->ODR &= ~(1 << 12);
 	while (flag_tighten == 0) {
+		if (flag_sync == 1) sync();
 		SCB->SCR &= ~( SCB_SCR_SLEEPDEEP_Msk);
 		wait_for_interrupt();
 	}
@@ -167,7 +183,7 @@ while (1) {
 	COMP2->CSR &= ~(COMP_CSR_COMP2EN);
 	EXTI->IMR &= ~(EXTI_IMR_IM22);
 	NVIC->ISER[0] &= ~(1 << ADC1_COMP_IRQn);
-
+	EXTI->IMR &= ~(EXTI_IMR_IM8);
 
 	//Pressure sensor on face of shoe
 	GPIOB->MODER &= ~(GPIO_MODER_MODE7);
@@ -206,12 +222,17 @@ while (1) {
 	EXTI->FTSR &= ~EXTI_FTSR_FT9;
 	EXTI->IMR |= EXTI_IMR_IM9; //unmask the interrupt
 
+	//enable the sync button interrupt
+	EXTI->IMR |= EXTI_IMR_IM8;
+
 	//wait for untighten interrupt
 	flag_untighten = 0;
+	flag_sync = 0;
 
 	GPIOB->ODR &= ~(1 << 5);
 	GPIOB->ODR &= ~(1 << 12);
 	while (flag_untighten == 0) {
+		if (flag_sync == 1) sync();
 		SCB->SCR &= ~( SCB_SCR_SLEEPDEEP_Msk);
 		wait_for_interrupt();
 	}
@@ -224,62 +245,16 @@ while (1) {
 
 	GPIOB->ODR |= (1 << 12);
 
-	nano_wait(10000);
 
-	//Disable the untighten button interrupt
-	EXTI->IMR &= ~(EXTI_IMR_IM9);
+	//Disable the sync button interrupt
+	EXTI->IMR &= ~(EXTI_IMR_IM8);
 
 	GPIOB->ODR &= ~(1 << 5);
 	start_encoder();
 	motor_driver_encoder(DIR_UNTIGHTEN);
 
 }
-
 	return 0;
-
-	//GPIOB->ODR |= 1 << 5;
-
-	initialize(); //will setup things like the coulomb counter and initial state of the system
-
-	while (1) {
-		//main loop
-		
-		switch (state) {
-			
-			case STATE_NOTTIGHT:
-				state_not_tight(); //will setup sensors to wait for a tighten request or synch request
-				//wait_for_interrupt(); //put processor to sleep until an interrupt occurs
-			break;
-			case STATE_TIGHT:
-				//GPIOB->ODR |= 1 << 9;
-				state_tight();
-			break;
-			case STATE_TIGHTENING:
-				tighten(); //will go through procedure to tighten shoe until the shoe is tight and put the shoe into the STATE_TIGHT state
-			break;
-			case STATE_SYNCHING:
-				synch();  //will go through procedure to synch the step count of the shoe and put the shoe back into the previous state
-			break;
-			default:
-			//error, unrecognized state
-			return 1;
-			break;
-		}
-	}
-
-
-	//start_encoder();
-	//motor_driver_encoder();
-
-	/*General flow of program:
-	 * 1. Initialize peripherals. Especially the coulomb counter peripheral
-	 * 2. Enter sleep mode (WFI), the only interrupt that wakes up the STM is from the comparator (pressure sensor)
-	 * 3. Once awake, perform tightening procedure:
-	 * 		-Begin tightening, sample encoder pulse count at a regular interval. It it is below a set threshold, stop the motor (it is stalling out)
-	 * 4. Once the shoes are tight, the pressure sensor will trigger interrupts to count steps.
-	 *
-	 */
-
 }
 
 void write_eeprom_data() {
@@ -322,14 +297,13 @@ void get_eeprom_data() {
 
 }
 
-void synch() {
+void sync() {
 
-	//communicate over uart with the nrf52 to synch the step count and battery life to the android application
+		int battery_life =(MAX_MAH - (battery_ticks * MAH_PER_TICK)) / (MAX_MAH / 100);
+
+		//communicate over uart with the nrf52 to synch the step count and battery life to the android application
 		char test_message[8] = {'s', 'y', (char)100, (char)69, (char)(0x00), (char)(0x00), (char)(0x01), (char)(0xFF)};
-
-		char test_rx[6] = {0, 0, 0, 0, 0, 0};
-		char test_rx_expected[6] = "ledon\n";
-		short match = 0;
+		char message[8] = {'s', 'y', (char)battery_life, (char)69, 0, 0, 1, 0xFF};
 
 		//Configure Pins
 		RCC->IOPENR |= RCC_IOPENR_IOPAEN;
@@ -350,30 +324,19 @@ void synch() {
 
 		//Send data via TX
 		for (int a = 0; a < 8; a++) {
-			USART1->TDR = test_message[a];
+			USART1->TDR = message[a];
 			while (!(USART1->ISR & USART_ISR_TC)); //wait for the transfer to be complete
 		}
 
 		//Enable the RX
 		USART1->CR1 |= USART_CR1_RE | USART_CR1_RXNEIE;
 
-		//Receive some data. if it matches the expected string, turn the onboard LED on
-		for (int a = 0; a < 6; a++) {
-			while (!((USART1->ISR & USART_ISR_RXNE) == USART_ISR_RXNE));
-			test_rx[a] = (uint8_t)(USART1->RDR); /* Receive data, clear flag */
-		}
+		RCC->APB2RSTR |= RCC_APB2RSTR_USART1RST;
+		RCC->APB2ENR &= ~(RCC_APB2ENR_USART1EN);
+		RCC->APB2RSTR &= ~RCC_APB2RSTR_USART1RST;
 
-		for (int a = 0; a < 6; a++){
-			if (test_rx[a] == test_rx_expected[a]) match++;
-		}
 
-		if (match == 6) {
-			GPIOA->MODER &= ~(GPIO_MODER_MODE5);
-			GPIOA->MODER |= GPIO_MODER_MODE5_0;
-			GPIOA->ODR |= 1 << 5;
-		}
-
-		while (1);
+		flag_sync = 0;
 
 }
 

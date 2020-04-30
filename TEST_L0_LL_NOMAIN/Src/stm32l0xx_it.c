@@ -291,6 +291,7 @@ void USART1_IRQHandler() {
 }
 
 extern int flag_untighten;
+extern int flag_sync;
 void EXTI4_15_IRQHandler() {
 	//interrupt for the coulomb counter (PC15)
 
@@ -327,6 +328,24 @@ void EXTI4_15_IRQHandler() {
 
 		flag_untighten = 1;
 		EXTI->IMR |= EXTI_IMR_IM9;
+	}
+	else if ((EXTI->PR & EXTI_PR_PIF8) != 0) {
+		//untighten button
+		EXTI->PR |= EXTI_PR_PIF8; //clear pending flag for interrupt
+		EXTI->IMR &= ~(EXTI_IMR_IM8);
+
+		//debounce
+		int deb = 1;
+		while (deb > 0) {
+			deb = 0;
+			for (int x = 0; x < 100; x++) {
+				if ((GPIOB->IDR & (1 << 8)) == 0) deb++;
+				nano_wait(10);
+			}
+		}
+
+		flag_sync = 1;
+		EXTI->IMR |= EXTI_IMR_IM8;
 	}
 }
 
