@@ -74,7 +74,7 @@ void wait_for_interrupt();
 void nano_wait(int);
 void test_h_bridge();
 void test_encoder();
-void test_comparator();
+//void test_comparator();
 void test_uart();
 void test_coulomb_counter();
 void motor_driver_encoder(int);
@@ -90,6 +90,10 @@ void untighten();
 void get_eeprom_data();
 void write_eeprom_data();
 void test_eeprom(int);
+void step_counter_enabled(int);
+
+void setup_untightened();
+void setup_tightened();
 
 /* USER CODE BEGIN EFP */
 
@@ -164,7 +168,7 @@ void test_eeprom(int);
 #define MAX_MAH 52000000
 #define MAH_PER_TICK 1707
 #define MAH_LEFT_GREEN 42000000 //defined as integers for quicker operations
-#define MAH_LEFT_RED 51997000
+#define MAH_LEFT_RED 10000000
 
 
 /* USER CODE END Private defines */
